@@ -132,6 +132,12 @@ function extractJsonObject<T>(rawText: string | undefined): T {
 
 async function startServer() {
   const app = express();
+  app.disable('x-powered-by');
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
   app.use(express.json({ limit: '2mb' }));
 
   app.get('/api/health', (_req, res) => {
@@ -1564,6 +1570,400 @@ Return ONLY valid JSON (no markdown fences) matching this exact schema:
         message: parsedErr.userMessage,
       });
     }
+  });
+
+  // Automated One-Click SEO Health Check (Load Speed, Mobile-Friendliness & Missing Meta-Tags)
+  app.post('/api/seo/health-check', async (req, res) => {
+    const {
+      websiteUrl = '',
+      prospectId = '',
+      prospectBusinessName = '',
+    } = req.body as {
+      websiteUrl?: string;
+      prospectId?: string;
+      prospectBusinessName?: string;
+    };
+
+    const rawInput = websiteUrl.trim();
+    if (!rawInput) {
+      res.status(400).json({
+        error: 'INVALID_URL',
+        message: 'Provide a website URL to run the One-Click SEO Health Check.',
+      });
+      return;
+    }
+
+    let parsedUrl: URL;
+    try {
+      const withScheme = /^https?:\/\//i.test(rawInput) ? rawInput : `https://${rawInput}`;
+      parsedUrl = new URL(withScheme);
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        throw new Error('Unsupported scheme');
+      }
+      if (!parsedUrl.hostname.includes('.') || isBlockedPrivateHost(parsedUrl.hostname)) {
+        res.status(400).json({
+          error: 'INVALID_HOST',
+          message: 'Enter a valid public website domain (e.g. https://brightsmile.com).',
+        });
+        return;
+      }
+    } catch {
+      res.status(400).json({
+        error: 'INVALID_URL',
+        message: 'Unable to parse prospect website URL.',
+      });
+      return;
+    }
+
+    const normalizedUrl = parsedUrl.toString();
+    const domain = parsedUrl.hostname.replace(/^www\./, '').toLowerCase();
+
+    let reachable = false;
+    let httpStatus: number | null = null;
+    let responseTimeMs: number | null = null;
+    let finalUrl = normalizedUrl;
+    let isHttps = parsedUrl.protocol === 'https:';
+    let compressed = false;
+    let payloadKb = 0;
+    let html = '';
+
+    const startedAt = Date.now();
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8500);
+      const pageRes = await fetch(normalizedUrl, {
+        signal: controller.signal,
+        redirect: 'follow',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
+        },
+      });
+      clearTimeout(timeout);
+
+      responseTimeMs = Date.now() - startedAt;
+      httpStatus = pageRes.status;
+      finalUrl = pageRes.url || normalizedUrl;
+      isHttps = finalUrl.startsWith('https://');
+      const contentEnc = (pageRes.headers.get('content-encoding') || '').toLowerCase();
+      compressed = /gzip|br|deflate/.test(contentEnc);
+
+      const contentType = (pageRes.headers.get('content-type') || '').toLowerCase();
+      if (pageRes.ok && (contentType.includes('text/html') || contentType === '')) {
+        reachable = true;
+        const fullText = await pageRes.text();
+        payloadKb = Math.round((Buffer.byteLength(fullText, 'utf8') / 1024) * 10) / 10;
+        html = fullText.slice(0, 300000);
+      }
+    } catch {
+      responseTimeMs = Date.now() - startedAt;
+    }
+
+    if (!reachable) {
+      const unreachableReport = {
+        id: `hc-${domain.replace(/[^a-z0-9]/g, '')}-${Date.now()}`,
+        checkedAt: new Date().toISOString(),
+        domain,
+        normalizedUrl,
+        finalUrl,
+        prospectId: prospectId || undefined,
+        prospectBusinessName: prospectBusinessName || undefined,
+        reachable: false,
+        httpStatus,
+        healthScore: 15,
+        loadSpeed: {
+          responseTimeMs,
+          payloadKb: 0,
+          compressed: false,
+          isHttps,
+          grade: 'Unreachable',
+          summary: httpStatus
+            ? `${domain} returned HTTP ${httpStatus} (${responseTimeMs ?? 'N/A'}ms), blocking automated inspection or failing to serve public HTML.`
+            : `${domain} timed out or refused connection after ${responseTimeMs ?? '8500'}ms.`,
+        },
+        mobileFriendliness: {
+          mobileFriendly: false,
+          hasViewportTag: false,
+          hasDeviceWidth: false,
+          responsiveHintsDetected: false,
+          grade: 'Unverified',
+          summary: 'Mobile viewport could not be verified because the site failed to serve public HTML.',
+        },
+        metaTags: {
+          missingCount: 1,
+          warningCount: 0,
+          passedCount: 0,
+          checks: [
+            {
+              id: 'availability',
+              label: 'Public HTML Reachability',
+              status: 'missing',
+              observedValue: httpStatus ? `HTTP ${httpStatus}` : 'Timeout / Connection Blocked',
+              recommendation: 'Ensure the live homepage resolves with HTTP 200 and does not block search crawlers.',
+            },
+          ],
+        },
+        thirtySecondSummary: `${domain} could not be reached cleanly (${httpStatus ? `HTTP ${httpStatus}` : 'connection timeout'}). Potential patients or search crawlers hitting downtime or strict firewall blocks will bounce immediately—strong opportunity to pitch a fast, reliable Next.js/Cloudflare site rebuild.`,
+        topFixes: [
+          'Restore clean HTTP 200 homepage availability for users and Googlebot',
+          'Verify SSL certificate and DNS routing without redirect loops',
+          'Audit firewall rules to ensure search crawlers are not blocked',
+        ],
+        outreachPitchHook: `I ran a quick technical check on ${domain} and noticed it returned ${httpStatus ? `HTTP ${httpStatus}` : 'a connection timeout'}—fixing uptime and speed could immediately recover lost local traffic.`,
+      };
+      res.json(unreachableReport);
+      return;
+    }
+
+    // Parse Speed, Mobile & Meta Tags
+    const speedGrade: 'Fast' | 'Moderate' | 'Slow' =
+      (responseTimeMs ?? 9999) <= 600
+        ? 'Fast'
+        : (responseTimeMs ?? 9999) <= 1400
+          ? 'Moderate'
+          : 'Slow';
+
+    const speedSummary =
+      speedGrade === 'Fast'
+        ? `Fast server response (${responseTimeMs}ms, ${payloadKb} KB HTML${isHttps ? ', HTTPS' : ', NO HTTPS'}).`
+        : speedGrade === 'Moderate'
+          ? `Moderate response time (${responseTimeMs}ms, ${payloadKb} KB HTML). Trimming render-blocking scripts and enabling edge caching would boost mobile conversions.`
+          : `Slow initial response (${responseTimeMs}ms, ${payloadKb} KB HTML). Visitors on mobile connections likely experience noticeable delay before first paint.`;
+
+    // Mobile-Friendliness Check
+    const viewportMatch =
+      html.match(/<meta[^>]+name=["']viewport["'][^>]*content=["']([\s\S]*?)["'][^>]*>/i) ||
+      html.match(/<meta[^>]+content=["']([\s\S]*?)["'][^>]*name=["']viewport["'][^>]*>/i);
+    const viewportContent = viewportMatch ? decodeHtmlEntities(viewportMatch[1]) : '';
+    const hasViewportTag = Boolean(viewportMatch);
+    const hasDeviceWidth = /width\s*=\s*device-width/i.test(viewportContent);
+    const responsiveHintsDetected =
+      /@media\s*\(/i.test(html) || /responsive|mobile-nav|hamburger|flex-wrap|grid-cols/i.test(html);
+    const mobileFriendly = hasViewportTag && hasDeviceWidth;
+    const mobileGrade: 'Mobile-Ready' | 'Needs Viewport Fix' = mobileFriendly
+      ? 'Mobile-Ready'
+      : 'Needs Viewport Fix';
+    const mobileSummary = mobileFriendly
+      ? `Mobile viewport tag detected (${viewportContent})${responsiveHintsDetected ? ' with responsive layout patterns' : ''}.`
+      : hasViewportTag
+        ? `Viewport tag found ("${viewportContent}") but missing width=device-width, risking horizontal zoom/scroll issues on phones.`
+        : 'Missing <meta name="viewport"> tag—mobile browsers will render a zoomed-out desktop layout.';
+
+    // Meta-Tag & SEO Checklist
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const titleText = titleMatch ? stripHtmlTags(titleMatch[1]) : '';
+    const metaDescMatch =
+      html.match(/<meta[^>]+name=["']description["'][^>]*content=["']([\s\S]*?)["'][^>]*>/i) ||
+      html.match(/<meta[^>]+content=["']([\s\S]*?)["'][^>]*name=["']description["'][^>]*>/i);
+    const metaDescText = metaDescMatch ? decodeHtmlEntities(metaDescMatch[1]) : '';
+    const canonicalMatch = html.match(/<link[^>]+rel=["']canonical["'][^>]*href=["']([\s\S]*?)["']/i);
+    const ogTitleMatch = html.match(/<meta[^>]+property=["']og:title["'][^>]*content=["']([\s\S]*?)["']/i);
+    const ogDescMatch = html.match(/<meta[^>]+property=["']og:description["'][^>]*content=["']([\s\S]*?)["']/i);
+    const ogImageMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([\s\S]*?)["']/i);
+    const twitterCardMatch = html.match(/<meta[^>]+name=["']twitter:card["'][^>]*content=["']([\s\S]*?)["']/i);
+    const robotsMatch = html.match(/<meta[^>]+name=["']robots["'][^>]*content=["']([\s\S]*?)["']/i);
+    const htmlLangMatch = html.match(/<html[^>]+lang=["']([^"']+)["']/i);
+    const h1Count = Array.from(html.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/gi)).length;
+    const hasSchema = /application\/ld\+json/i.test(html);
+
+    interface CheckRow {
+      id: string;
+      label: string;
+      status: 'pass' | 'warning' | 'missing';
+      observedValue: string;
+      recommendation: string;
+    }
+
+    const checks: CheckRow[] = [
+      {
+        id: 'title',
+        label: 'Title Tag (<title>)',
+        status: !titleText
+          ? 'missing'
+          : titleText.length >= 25 && titleText.length <= 65
+            ? 'pass'
+            : 'warning',
+        observedValue: titleText ? `${titleText.length} chars: "${titleText.slice(0, 70)}"` : 'Missing',
+        recommendation: !titleText
+          ? 'Add a keyword-rich <title> (30–65 chars) including primary service and city.'
+          : titleText.length < 25 || titleText.length > 65
+            ? 'Tighten <title> to 30–65 characters so Google does not truncate it in SERPs.'
+            : 'Title tag length is within optimal SERP bounds.',
+      },
+      {
+        id: 'description',
+        label: 'Meta Description',
+        status: !metaDescText
+          ? 'missing'
+          : metaDescText.length >= 70 && metaDescText.length <= 165
+            ? 'pass'
+            : 'warning',
+        observedValue: metaDescText
+          ? `${metaDescText.length} chars: "${metaDescText.slice(0, 90)}"`
+          : 'Missing',
+        recommendation: !metaDescText
+          ? 'Add a persuasive 120–155 char meta description with a clear local CTA to lift organic CTR.'
+          : metaDescText.length < 70 || metaDescText.length > 165
+            ? 'Adjust meta description to 120–155 characters for optimal mobile snippet visibility.'
+            : 'Meta description length is well-formatted.',
+      },
+      {
+        id: 'viewport',
+        label: 'Mobile Viewport Meta',
+        status: mobileFriendly ? 'pass' : hasViewportTag ? 'warning' : 'missing',
+        observedValue: viewportContent || 'Missing',
+        recommendation: mobileFriendly
+          ? 'Viewport properly configured for responsive mobile rendering.'
+          : 'Add <meta name="viewport" content="width=device-width, initial-scale=1">.',
+      },
+      {
+        id: 'h1',
+        label: 'Primary Heading (<h1>)',
+        status: h1Count === 1 ? 'pass' : h1Count > 1 ? 'warning' : 'missing',
+        observedValue: h1Count === 0 ? 'Missing (0 H1 tags)' : `${h1Count} H1 tag(s)`,
+        recommendation:
+          h1Count === 1
+            ? 'Single primary H1 heading detected.'
+            : h1Count === 0
+              ? 'Add one clear H1 headline stating your core niche service and city.'
+              : 'Consolidate multiple H1 tags into one primary topic headline.',
+      },
+      {
+        id: 'canonical',
+        label: 'Canonical URL Tag',
+        status: canonicalMatch ? 'pass' : 'missing',
+        observedValue: canonicalMatch ? canonicalMatch[1].slice(0, 70) : 'Missing',
+        recommendation: canonicalMatch
+          ? 'Canonical link prevents duplicate URL indexing.'
+          : 'Add <link rel="canonical"> to consolidate ranking authority on preferred URLs.',
+      },
+      {
+        id: 'opengraph',
+        label: 'OpenGraph Social Meta (og:title / og:image)',
+        status:
+          ogTitleMatch && ogDescMatch && ogImageMatch
+            ? 'pass'
+            : ogTitleMatch || ogImageMatch
+              ? 'warning'
+              : 'missing',
+        observedValue:
+          [
+            ogTitleMatch ? 'og:title' : null,
+            ogDescMatch ? 'og:description' : null,
+            ogImageMatch ? 'og:image' : null,
+          ]
+            .filter(Boolean)
+            .join(', ') || 'Missing OpenGraph tags',
+        recommendation:
+          ogTitleMatch && ogDescMatch && ogImageMatch
+            ? 'Complete OpenGraph share metadata configured.'
+            : 'Add og:title, og:description, and og:image for clean link previews on LinkedIn/WhatsApp.',
+      },
+      {
+        id: 'twitter',
+        label: 'Twitter / X Card Meta',
+        status: twitterCardMatch ? 'pass' : 'missing',
+        observedValue: twitterCardMatch ? twitterCardMatch[1] : 'Missing',
+        recommendation: twitterCardMatch
+          ? 'Social card tag present.'
+          : 'Add <meta name="twitter:card" content="summary_large_image">.',
+      },
+      {
+        id: 'schema',
+        label: 'Schema.org JSON-LD Markup',
+        status: hasSchema ? 'pass' : 'missing',
+        observedValue: hasSchema ? 'Detected' : 'Missing',
+        recommendation: hasSchema
+          ? 'Structured data present for rich Google snippets.'
+          : 'Deploy LocalBusiness + FAQPage JSON-LD schema to qualify for rich SERP results.',
+      },
+      {
+        id: 'robots',
+        label: 'Robots & Indexing Directive',
+        status: robotsMatch && /noindex/i.test(robotsMatch[1]) ? 'warning' : 'pass',
+        observedValue: robotsMatch ? robotsMatch[1] : 'Default (index, follow)',
+        recommendation:
+          robotsMatch && /noindex/i.test(robotsMatch[1])
+            ? 'CRITICAL: Page has noindex directive blocking Google from ranking it!'
+            : 'No blocking robots directive detected.',
+      },
+      {
+        id: 'lang',
+        label: 'HTML Language Attribute',
+        status: htmlLangMatch ? 'pass' : 'missing',
+        observedValue: htmlLangMatch ? `lang="${htmlLangMatch[1]}"` : 'Missing',
+        recommendation: htmlLangMatch
+          ? 'Language attribute aids regional search targeting and accessibility.'
+          : 'Add lang="en" (or regional code) on <html> for search and WCAG accessibility.',
+      },
+    ];
+
+    const missingChecks = checks.filter((c) => c.status === 'missing');
+    const warningChecks = checks.filter((c) => c.status === 'warning');
+    const passedChecks = checks.filter((c) => c.status === 'pass');
+
+    let score = 100;
+    if (!isHttps) score -= 12;
+    if (speedGrade === 'Moderate') score -= 8;
+    if (speedGrade === 'Slow') score -= 18;
+    if (!mobileFriendly) score -= 15;
+    score -= missingChecks.length * 7;
+    score -= warningChecks.length * 3;
+    const healthScore = Math.min(99, Math.max(12, score));
+
+    const missingLabels = missingChecks.map((c) => c.label.replace(/\s*\(.*?\)/, ''));
+    const topFixes = [
+      ...(!isHttps ? ['Enforce HTTPS/SSL across all pages'] : []),
+      ...(speedGrade === 'Slow' ? [`Optimize server response time (${responseTimeMs}ms -> <600ms)`] : []),
+      ...(!mobileFriendly ? ['Add responsive mobile viewport tag (width=device-width)'] : []),
+      ...missingChecks.slice(0, 4).map((c) => c.recommendation),
+      ...warningChecks.slice(0, 2).map((c) => c.recommendation),
+    ].slice(0, 5);
+
+    const subjectName = prospectBusinessName ? `${prospectBusinessName} (${domain})` : domain;
+    const thirtySecondSummary = `${subjectName} scored ${healthScore}/100 in our live check. Load speed is ${speedGrade.toLowerCase()} (${responseTimeMs}ms, ${payloadKb} KB${isHttps ? ', HTTPS secured' : ', missing HTTPS'}), and mobile-friendliness is ${mobileFriendly ? 'configured with a proper viewport meta tag' : 'at risk due to missing/incomplete mobile viewport setup'}. ${missingChecks.length > 0 ? `Detected ${missingChecks.length} missing SEO tag(s): ${missingLabels.join(', ')}.` : 'All core HTML meta tags are present.'} Fixing these gaps gives an immediate visibility and mobile conversion lift.`;
+
+    const outreachPitchHook = `I ran a 30-second SEO health check on ${domain} (${healthScore}/100): load time measured ${responseTimeMs}ms${!mobileFriendly ? ', mobile viewport configuration needs fixing,' : ''} and ${missingChecks.length > 0 ? `it is missing ${missingLabels.slice(0, 3).join(', ')}` : 'meta snippets can be sharpened for higher local CTR'}. Fixing these quick wins could immediately capture missed local leads.`;
+
+    res.json({
+      id: `hc-${domain.replace(/[^a-z0-9]/g, '')}-${Date.now()}`,
+      checkedAt: new Date().toISOString(),
+      domain,
+      normalizedUrl,
+      finalUrl,
+      prospectId: prospectId || undefined,
+      prospectBusinessName: prospectBusinessName || undefined,
+      reachable: true,
+      httpStatus,
+      healthScore,
+      loadSpeed: {
+        responseTimeMs,
+        payloadKb,
+        compressed,
+        isHttps,
+        grade: speedGrade,
+        summary: speedSummary,
+      },
+      mobileFriendliness: {
+        mobileFriendly,
+        hasViewportTag,
+        hasDeviceWidth,
+        responsiveHintsDetected,
+        grade: mobileGrade,
+        summary: mobileSummary,
+      },
+      metaTags: {
+        missingCount: missingChecks.length,
+        warningCount: warningChecks.length,
+        passedCount: passedChecks.length,
+        checks,
+      },
+      thirtySecondSummary,
+      topFixes,
+      outreachPitchHook,
+    });
   });
 
   const server = http.createServer(app);

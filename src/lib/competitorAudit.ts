@@ -74,6 +74,52 @@ export interface CompetitorAuditReport {
   grounded: boolean;
 }
 
+export interface SeoMetaTagCheck {
+  id: string;
+  label: string;
+  status: 'pass' | 'warning' | 'missing';
+  observedValue: string;
+  recommendation: string;
+}
+
+export interface SeoHealthCheckReport {
+  id: string;
+  checkedAt: string;
+  domain: string;
+  normalizedUrl: string;
+  finalUrl: string;
+  prospectId?: string;
+  prospectBusinessName?: string;
+  reachable: boolean;
+  httpStatus: number | null;
+  healthScore: number;
+  loadSpeed: {
+    responseTimeMs: number | null;
+    payloadKb: number;
+    compressed: boolean;
+    isHttps: boolean;
+    grade: 'Fast' | 'Moderate' | 'Slow' | 'Unreachable';
+    summary: string;
+  };
+  mobileFriendliness: {
+    mobileFriendly: boolean;
+    hasViewportTag: boolean;
+    hasDeviceWidth: boolean;
+    responsiveHintsDetected: boolean;
+    grade: 'Mobile-Ready' | 'Needs Viewport Fix' | 'Unverified';
+    summary: string;
+  };
+  metaTags: {
+    missingCount: number;
+    warningCount: number;
+    passedCount: number;
+    checks: SeoMetaTagCheck[];
+  };
+  thirtySecondSummary: string;
+  topFixes: string[];
+  outreachPitchHook: string;
+}
+
 const AUDIT_HISTORY_KEY = 'clientsology_competitor_audits_v1';
 
 export function normalizeCompetitorUrl(rawUrl: string): { valid: boolean; url: string; domain: string; error?: string } {

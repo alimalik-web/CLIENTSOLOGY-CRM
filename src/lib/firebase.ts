@@ -1,5 +1,6 @@
-import { initializeApp } from 'firebase/app';
+import { FirebaseApp, initializeApp } from 'firebase/app';
 import {
+  Auth,
   getAuth,
   GoogleAuthProvider,
   onAuthStateChanged,
@@ -7,8 +8,48 @@ import {
   signOut,
   User,
 } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { doc, Firestore, getDocFromServer, getFirestore } from 'firebase/firestore';
+
+interface FirebaseClientConfig {
+  apiKey?: string;
+  authDomain?: string;
+  projectId?: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+  firestoreDatabaseId?: string;
+}
+
+const localConfigModules = import.meta.glob('/firebase-applet-config.json', {
+  eager: true,
+}) as Record<string, { default?: FirebaseClientConfig } | FirebaseClientConfig>;
+
+const rawLocalModule = localConfigModules['/firebase-applet-config.json'];
+const localFileConfig: FirebaseClientConfig =
+  rawLocalModule && 'default' in rawLocalModule && rawLocalModule.default
+    ? rawLocalModule.default
+    : (rawLocalModule as FirebaseClientConfig) || {};
+
+const firebaseConfig: FirebaseClientConfig = {
+  apiKey: (import.meta.env.VITE_FIREBASE_API_KEY as string) || localFileConfig.apiKey || '',
+  authDomain:
+    (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string) || localFileConfig.authDomain || '',
+  projectId:
+    (import.meta.env.VITE_FIREBASE_PROJECT_ID as string) || localFileConfig.projectId || '',
+  storageBucket:
+    (import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string) || localFileConfig.storageBucket || '',
+  messagingSenderId:
+    (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string) ||
+    localFileConfig.messagingSenderId ||
+    '',
+  appId: (import.meta.env.VITE_FIREBASE_APP_ID as string) || localFileConfig.appId || '',
+  firestoreDatabaseId:
+    (import.meta.env.VITE_FIREBASE_DATABASE_ID as string) ||
+    localFileConfig.firestoreDatabaseId ||
+    '',
+};
+
+export const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
 export const WORKSPACE_SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
@@ -18,14 +59,20 @@ export const WORKSPACE_SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
 ] as const;
 
-const app = initializeApp(firebaseConfig);
+let app: FirebaseApp | null = null;
+let firestoreInstance: Firestore | null = null;
+let authInstance: Auth | null = null;
 
-const databaseId =
-  (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId ||
-  'ai-studio-e247321c-cae3-405c-a8b6-8a1c6e82f52f';
+if (isFirebaseConfigured) {
+  app = initializeApp(firebaseConfig);
+  const databaseId =
+    firebaseConfig.firestoreDatabaseId || 'ai-studio-e247321c-cae3-405c-a8b6-8a1c6e82f52f';
+  firestoreInstance = getFirestore(app, databaseId);
+  authInstance = getAuth(app);
+}
 
-export const db = getFirestore(app, databaseId);
-export const auth = getAuth(app);
+export const db = firestoreInstance as Firestore;
+export const auth = authInstance as Auth;
 
 const provider = new GoogleAuthProvider();
 WORKSPACE_SCOPES.forEach((scope) => provider.addScope(scope));
@@ -66,16 +113,17 @@ export function handleFirestoreError(
   operationType: OperationType,
   path: string | null
 ): never {
+  const currentUser = authInstance?.currentUser;
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
+      userId: currentUser?.uid,
+      email: currentUser?.email,
+      emailVerified: currentUser?.emailVerified,
+      isAnonymous: currentUser?.isAnonymous,
+      tenantId: currentUser?.tenantId,
       providerInfo:
-        auth.currentUser?.providerData?.map((p) => ({
+        currentUser?.providerData?.map((p) => ({
           providerId: p.providerId,
           email: p.email,
         })) || [],
@@ -88,8 +136,9 @@ export function handleFirestoreError(
 }
 
 export async function testFirestoreConnection(): Promise<boolean> {
+  if (!firestoreInstance) return false;
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDocFromServer(doc(firestoreInstance, 'test', 'connection'));
     return true;
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
@@ -103,7 +152,11 @@ export async function testFirestoreConnection(): Promise<boolean> {
 export function initAuth(
   onAuthChange: (user: User | null, accessToken: string | null) => void
 ) {
-  return onAuthStateChanged(auth, (user) => {
+  if (!authInstance) {
+    onAuthChange(null, null);
+    return () => {};
+  }
+  return onAuthStateChanged(authInstance, (user) => {
     if (!user) {
       cachedAccessToken = null;
       onAuthChange(null, null);
@@ -117,9 +170,12 @@ export async function googleSignIn(): Promise<{
   user: User;
   accessToken: string | null;
 }> {
+  if (!authInstance) {
+    throw new Error('Firebase authentication is not configured in this environment.');
+  }
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(authInstance, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     cachedAccessToken = credential?.accessToken ?? null;
     return { user: result.user, accessToken: cachedAccessToken };
@@ -134,5 +190,7 @@ export async function getWorkspaceAccessToken(): Promise<string | null> {
 
 export async function googleSignOut(): Promise<void> {
   cachedAccessToken = null;
-  await signOut(auth);
+  if (authInstance) {
+    await signOut(authInstance);
+  }
 }
