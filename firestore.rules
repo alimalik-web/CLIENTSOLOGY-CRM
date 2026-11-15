@@ -1,0 +1,208 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Default-deny global catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable security primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidProspect(data, userId, prospectId) {
+      return data.keys().hasAll([
+        'id', 'ownerUid', 'businessName', 'country', 'categoryNiche',
+        'leadQuality', 'stage', 'ticketUsd', 'status', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'ownerUid', 'businessName', 'contactPerson', 'roleTitle',
+        'email', 'phone', 'website', 'country', 'stateOrRegion', 'city',
+        'categoryNiche', 'leadQuality', 'stage', 'serviceInterest', 'ticketUsd',
+        'dateAdded', 'nextFollowUp', 'lastContacted', 'lastMessageSent',
+        'replyNotes', 'competitorAdvantage', 'status', 'createdAt', 'updatedAt'
+      ])
+      && data.id == prospectId
+      && data.ownerUid == userId
+      && data.businessName is string && data.businessName.size() >= 1 && data.businessName.size() <= 160
+      && (!('contactPerson' in data) || (data.contactPerson is string && data.contactPerson.size() <= 120))
+      && (!('roleTitle' in data) || (data.roleTitle is string && data.roleTitle.size() <= 120))
+      && (!('email' in data) || (data.email is string && data.email.size() <= 160))
+      && (!('phone' in data) || (data.phone is string && data.phone.size() <= 64))
+      && (!('website' in data) || (data.website is string && data.website.size() <= 200))
+      && data.country is string && data.country.size() >= 1 && data.country.size() <= 80
+      && (!('stateOrRegion' in data) || (data.stateOrRegion is string && data.stateOrRegion.size() <= 100))
+      && (!('city' in data) || (data.city is string && data.city.size() <= 100))
+      && data.categoryNiche is string && data.categoryNiche.size() >= 1 && data.categoryNiche.size() <= 100
+      && data.leadQuality in ['Hot', 'Warm', 'Cold', 'Dead']
+      && data.stage in ['New Lead', 'Contacted', 'Proposal Sent', 'Negotiating', 'Closed Won', 'Closed Lost', 'Follow Up']
+      && (!('serviceInterest' in data) || (data.serviceInterest is string && data.serviceInterest.size() <= 160))
+      && (data.ticketUsd is int || data.ticketUsd is float) && data.ticketUsd >= 0 && data.ticketUsd <= 1000000
+      && (!('dateAdded' in data) || (data.dateAdded is string && data.dateAdded.size() <= 32))
+      && (!('nextFollowUp' in data) || (data.nextFollowUp is string && data.nextFollowUp.size() <= 32))
+      && (!('lastContacted' in data) || (data.lastContacted is string && data.lastContacted.size() <= 32))
+      && (!('lastMessageSent' in data) || (data.lastMessageSent is string && data.lastMessageSent.size() <= 2000))
+      && (!('replyNotes' in data) || (data.replyNotes is string && data.replyNotes.size() <= 2000))
+      && (!('competitorAdvantage' in data) || (data.competitorAdvantage is string && data.competitorAdvantage.size() <= 240))
+      && data.status in ['Active', 'Archived'];
+    }
+
+    function isValidFollowUp(data, userId, followUpId) {
+      return data.keys().hasAll([
+        'id', 'ownerUid', 'prospectId', 'businessName', 'followUpDate',
+        'followUpType', 'priority', 'done', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'ownerUid', 'prospectId', 'businessName', 'followUpDate',
+        'followUpTime', 'followUpType', 'messageScript', 'stage',
+        'priority', 'done', 'outcome', 'nextStep', 'calendarEventId',
+        'createdAt', 'updatedAt'
+      ])
+      && data.id == followUpId
+      && data.ownerUid == userId
+      && isValidId(data.prospectId)
+      && data.businessName is string && data.businessName.size() >= 1 && data.businessName.size() <= 160
+      && data.followUpDate is string && data.followUpDate.size() >= 1 && data.followUpDate.size() <= 32
+      && (!('followUpTime' in data) || (data.followUpTime is string && data.followUpTime.size() <= 32))
+      && data.followUpType is string && data.followUpType.size() >= 1 && data.followUpType.size() <= 80
+      && (!('messageScript' in data) || (data.messageScript is string && data.messageScript.size() <= 3000))
+      && (!('stage' in data) || (data.stage is string && data.stage.size() <= 40))
+      && data.priority in ['High', 'Mid', 'Low']
+      && data.done is bool
+      && (!('outcome' in data) || (data.outcome is string && data.outcome.size() <= 400))
+      && (!('nextStep' in data) || (data.nextStep is string && data.nextStep.size() <= 400))
+      && (!('calendarEventId' in data) || (data.calendarEventId is string && data.calendarEventId.size() <= 200));
+    }
+
+    function isValidChatLog(data, userId, chatId) {
+      return data.keys().hasAll([
+        'id', 'ownerUid', 'prospectId', 'businessName', 'date',
+        'channel', 'direction', 'messageContent', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'ownerUid', 'prospectId', 'businessName', 'date', 'time',
+        'channel', 'direction', 'messageContent', 'responseSummary',
+        'createdAt', 'updatedAt'
+      ])
+      && data.id == chatId
+      && data.ownerUid == userId
+      && isValidId(data.prospectId)
+      && data.businessName is string && data.businessName.size() >= 1 && data.businessName.size() <= 160
+      && data.date is string && data.date.size() >= 1 && data.date.size() <= 32
+      && (!('time' in data) || (data.time is string && data.time.size() <= 32))
+      && data.channel in ['WhatsApp', 'Email', 'LinkedIn', 'Instagram DM', 'Phone', 'Fiverr']
+      && data.direction in ['Outbound', 'Inbound']
+      && data.messageContent is string && data.messageContent.size() >= 1 && data.messageContent.size() <= 4000
+      && (!('responseSummary' in data) || (data.responseSummary is string && data.responseSummary.size() <= 2000));
+    }
+
+    function isValidWorksheet(data, userId, sheetId) {
+      return data.keys().hasAll(['id', 'ownerUid', 'payloadJson', 'createdAt', 'updatedAt'])
+      && data.keys().hasOnly(['id', 'ownerUid', 'payloadJson', 'createdAt', 'updatedAt'])
+      && data.id == sheetId
+      && data.ownerUid == userId
+      && data.payloadJson is string && data.payloadJson.size() <= 100000;
+    }
+
+    match /users/{userId} {
+      allow read, write: if false;
+
+      match /prospects/{prospectId} {
+        allow get: if isValidId(prospectId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(prospectId) && isOwner(userId)
+          && isValidProspect(incoming(), userId, prospectId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(prospectId) && isOwner(userId)
+          && isValidProspect(incoming(), userId, prospectId)
+          && incoming().createdAt == existing().createdAt
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().id == existing().id
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'businessName', 'contactPerson', 'roleTitle', 'email', 'phone', 'website',
+            'country', 'stateOrRegion', 'city', 'categoryNiche', 'leadQuality', 'stage',
+            'serviceInterest', 'ticketUsd', 'dateAdded', 'nextFollowUp', 'lastContacted',
+            'lastMessageSent', 'replyNotes', 'competitorAdvantage', 'status', 'updatedAt'
+          ]);
+        allow delete: if isValidId(prospectId) && isOwner(userId);
+      }
+
+      match /followUps/{followUpId} {
+        allow get: if isValidId(followUpId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(followUpId) && isOwner(userId)
+          && isValidFollowUp(incoming(), userId, followUpId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(followUpId) && isOwner(userId)
+          && isValidFollowUp(incoming(), userId, followUpId)
+          && incoming().createdAt == existing().createdAt
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().id == existing().id
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'prospectId', 'businessName', 'followUpDate', 'followUpTime', 'followUpType',
+            'messageScript', 'stage', 'priority', 'done', 'outcome', 'nextStep',
+            'calendarEventId', 'updatedAt'
+          ]);
+        allow delete: if isValidId(followUpId) && isOwner(userId);
+      }
+
+      match /chatLogs/{chatId} {
+        allow get: if isValidId(chatId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(chatId) && isOwner(userId)
+          && isValidChatLog(incoming(), userId, chatId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(chatId) && isOwner(userId)
+          && isValidChatLog(incoming(), userId, chatId)
+          && incoming().createdAt == existing().createdAt
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().id == existing().id
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'prospectId', 'businessName', 'date', 'time', 'channel',
+            'direction', 'messageContent', 'responseSummary', 'updatedAt'
+          ]);
+        allow delete: if isValidId(chatId) && isOwner(userId);
+      }
+
+      match /worksheets/{sheetId} {
+        allow get: if isValidId(sheetId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(sheetId) && isOwner(userId)
+          && isValidWorksheet(incoming(), userId, sheetId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(sheetId) && isOwner(userId)
+          && isValidWorksheet(incoming(), userId, sheetId)
+          && incoming().createdAt == existing().createdAt
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().id == existing().id
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['payloadJson', 'updatedAt']);
+        allow delete: if isValidId(sheetId) && isOwner(userId);
+      }
+    }
+  }
+}

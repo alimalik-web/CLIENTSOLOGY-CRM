@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clientsology — Global Agency CRM</title>
+    <meta
+      name="description"
+      content="Global web development, SEO, and AI automation agency CRM with 47-country market tier intelligence, 3D market globe, automated outreach generator, pricing engine, and Google Sheets & Calendar sync."
+    />
+    <meta property="og:title" content="Clientsology — Global Agency CRM" />
+    <meta
+      property="og:description"
+      content="Global web development, SEO, and AI automation agency CRM with 47-country market tier intelligence, 3D market globe, automated outreach generator, pricing engine, and Google Sheets & Calendar sync."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('clientsology_theme_v1');
+          var theme = saved === 'light' || saved === 'dark' ? saved : 'dark';
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="bg-[#F3F4F1] dark:bg-[#0D0E12] text-[#111214] dark:text-[#F4F5F7] antialiased selection:bg-[#D9F154] selection:text-[#111214]">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

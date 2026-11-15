@@ -1,0 +1,115 @@
+{
+  "entities": {
+    "Prospect": {
+      "title": "Prospect",
+      "description": "CRM agency prospect record with contact details, regional tier metadata, deal ticket, and outreach status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "businessName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "contactPerson": { "type": "string", "maxLength": 120 },
+        "roleTitle": { "type": "string", "maxLength": 120 },
+        "email": { "type": "string", "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 64 },
+        "website": { "type": "string", "maxLength": 200 },
+        "country": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "stateOrRegion": { "type": "string", "maxLength": 100 },
+        "city": { "type": "string", "maxLength": 100 },
+        "categoryNiche": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "leadQuality": { "type": "string", "enum": ["Hot", "Warm", "Cold", "Dead"] },
+        "stage": {
+          "type": "string",
+          "enum": ["New Lead", "Contacted", "Proposal Sent", "Negotiating", "Closed Won", "Closed Lost", "Follow Up"]
+        },
+        "serviceInterest": { "type": "string", "maxLength": 160 },
+        "ticketUsd": { "type": "number" },
+        "dateAdded": { "type": "string", "maxLength": 32 },
+        "nextFollowUp": { "type": "string", "maxLength": 32 },
+        "lastContacted": { "type": "string", "maxLength": 32 },
+        "lastMessageSent": { "type": "string", "maxLength": 2000 },
+        "replyNotes": { "type": "string", "maxLength": 2000 },
+        "competitorAdvantage": { "type": "string", "maxLength": 240 },
+        "status": { "type": "string", "enum": ["Active", "Archived"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "businessName", "country", "categoryNiche", "leadQuality", "stage", "ticketUsd", "status", "createdAt", "updatedAt"]
+    },
+    "FollowUp": {
+      "title": "FollowUp",
+      "description": "Scheduled follow-up or discovery call linked to a prospect and optional Google Calendar event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "prospectId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "businessName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "followUpDate": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "followUpTime": { "type": "string", "maxLength": 32 },
+        "followUpType": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "messageScript": { "type": "string", "maxLength": 3000 },
+        "stage": { "type": "string", "maxLength": 40 },
+        "priority": { "type": "string", "enum": ["High", "Mid", "Low"] },
+        "done": { "type": "boolean" },
+        "outcome": { "type": "string", "maxLength": 400 },
+        "nextStep": { "type": "string", "maxLength": 400 },
+        "calendarEventId": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "prospectId", "businessName", "followUpDate", "followUpType", "priority", "done", "createdAt", "updatedAt"]
+    },
+    "ChatLog": {
+      "title": "ChatLog",
+      "description": "Individual outbound or inbound message log entry per prospect.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "prospectId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "businessName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "date": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "time": { "type": "string", "maxLength": 32 },
+        "channel": { "type": "string", "enum": ["WhatsApp", "Email", "LinkedIn", "Instagram DM", "Phone", "Fiverr"] },
+        "direction": { "type": "string", "enum": ["Outbound", "Inbound"] },
+        "messageContent": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "responseSummary": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "prospectId", "businessName", "date", "channel", "direction", "messageContent", "createdAt", "updatedAt"]
+    },
+    "WorksheetState": {
+      "title": "WorksheetState",
+      "description": "Agency operational planning state covering weekly plan, monthly goals, roadmap, funnel settings, and synced spreadsheet ID.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "payloadJson": { "type": "string", "maxLength": 100000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "payloadJson", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/prospects/{prospectId}": {
+      "schema": { "$ref": "#/entities/Prospect" },
+      "description": "User-owned prospect database records."
+    },
+    "/users/{userId}/followUps/{followUpId}": {
+      "schema": { "$ref": "#/entities/FollowUp" },
+      "description": "User-owned follow-up tracker and discovery call entries."
+    },
+    "/users/{userId}/chatLogs/{chatId}": {
+      "schema": { "$ref": "#/entities/ChatLog" },
+      "description": "User-owned prospect chat history log entries."
+    },
+    "/users/{userId}/worksheets/{sheetId}": {
+      "schema": { "$ref": "#/entities/WorksheetState" },
+      "description": "User-owned weekly plan, monthly goals, roadmap, and funnel configuration."
+    }
+  }
+}
